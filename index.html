@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Würfel Duell Live Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -153,87 +152,98 @@
 </div>
 
 <script>
-    let supabaseClient = null;
-    let realTimeChannel = null;
-    
-    let roomName = localStorage.getItem('sRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
-    localStorage.setItem('sRoomKey', roomName);
+    // Nutzt ein unblockbares, freies PubSub-Relay über Standard-HTTPS
+    const BASE_RELAY_URL = "https://pubsub.pubnub.com/v2/subscribe/demo/demo/";
+
+    let roomName = localStorage.getItem('nRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
+    localStorage.setItem('nRoomKey', roomName);
 
     let players = [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
-    const myClientId = 'user-' + Math.floor(Math.random() * 100000);
-
-    // Dedizierter, stabiler Supabase-Echtzeit-Server (verschlüsselt über HTTPS/Port 443)
-    const SUPABASE_URL = "https://wbmexbshscvbxvbywzsn.supabase.co";
-    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndibWV4YnNoc2N2Ynh2Ynl3enNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTY5Nzc2MDBsLCJleHAiOjIwMzI1NTM2MDB9.bV9wNXhMQU9xZEpfaXp3NnVvTGlfX1pfaHNyUHBfN2ZfNnAwN3AtNl93";
+    const myClientId = 'user_' + Math.floor(Math.random() * 100000);
+    let abortController = null;
 
     window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('roomKeyInput').value = roomName;
-        players = JSON.parse(localStorage.getItem('vData_s_' + roomName)) || [];
+        players = JSON.parse(localStorage.getItem('vData_n_' + roomName)) || [];
         updateUI();
-        
-        // Supabase initialisieren
-        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        initSupabaseLive();
+        initLiveStream();
     });
 
-    function initSupabaseLive() {
-        setStatusBar("🔄 Verbinde mit Live-Kanal...", "var(--warning)");
+    function initLiveStream() {
+        if (abortController) abortController.abort();
+        abortController = new AbortController();
 
-        if (realTimeChannel) {
-            supabaseClient.removeChannel(realTimeChannel);
-        }
+        setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
 
-        // Erstellt einen isolierten Echtzeit-Broadcast-Kanal für euren Raum
-        realTimeChannel = supabaseClient.channel('wuerfelduell_' + roomName, {
-            config: { broadcast: { self: false } }
-        });
+        // Sende direkt ein Signal, um aktuelle Daten von anderen Geräten im Raum anzufordern
+        setTimeout(() => {
+            sendNetworkMessage({ type: "REQUEST_DATA", sender: myClientId });
+        }, 500);
 
-        realTimeChannel
-            .on('broadcast', { event: 'sync' }, (payload) => {
-                if (payload && payload.payload && Array.isArray(payload.payload.data)) {
-                    players = payload.payload.data;
-                    localStorage.setItem('vData_s_' + roomName, JSON.stringify(players));
-                    updateUI();
-                }
-            })
-            .on('broadcast', { event: 'request' }, () => {
-                // Ein anderes Handy hat nach Daten gefragt – wir senden unsere Liste
-                if (players.length > 0) {
-                    sendDataToNetwork();
-                }
-            })
-            .subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-                    // Nach dem Beitritt fragen wir kurz in die Runde, ob jemand Daten hat
-                    realTimeChannel.send({
-                        type: 'broadcast',
-                        event: 'request',
-                        payload: { sender: myClientId }
-                    });
-                } else if (status === 'CHANNEL_ERROR' || status === 'CLOSED') {
-                    setStatusBar("⚠️ Verbindungsfehler. Versuche es erneut...", "var(--danger)");
-                }
-            });
+        // Starte den unblockbaren HTTP-Abfrage-Stream (Long Polling)
+        listenToNetwork(0);
     }
 
-    function sendDataToNetwork() {
-        if (realTimeChannel) {
-            realTimeChannel.send({
-                type: 'broadcast',
-                event: 'sync',
-                payload: { data: players, sender: myClientId }
+    async function listenToNetwork(timetoken) {
+        const channel = "wuerfelduell_" + roomName;
+        const url = `${BASE_RELAY_URL}${channel}/0/${timetoken}`;
+
+        try {
+            const response = await fetch(url, { signal: abortController.signal });
+            if (!response.ok) throw new Error();
+            
+            const json = await response.json();
+            
+            // Falls Nachrichten vorliegen, verarbeiten
+            if (json && json[0] && json[0].length > 0) {
+                json[0].forEach(msg => {
+                    if (msg.sender === myClientId) return; // Eigene Nachrichten ignorieren
+
+                    if (msg.type === "SYNC_DATA" && Array.isArray(msg.data)) {
+                        players = msg.data;
+                        localStorage.setItem('vData_n_' + roomName, JSON.stringify(players));
+                        updateUI();
+                    } 
+                    else if (msg.type === "REQUEST_DATA") {
+                        if (players.length > 0) {
+                            sendNetworkMessage({ type: "SYNC_DATA", data: players, sender: myClientId });
+                        }
+                    }
+                });
+            }
+            
+            // Sofort die nächste Abfrage starten (Echtzeit-Schleife)
+            listenToNetwork(json[1]);
+
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                // Bei Netzwerk-Schluckauf kurz warten und neu versuchen
+                setTimeout(() => listenToNetwork(timetoken), 3000);
+            }
+        }
+    }
+
+    async function sendNetworkMessage(obj) {
+        const channel = "wuerfelduell_" + roomName;
+        const publishUrl = `https://pubsub.pubnub.com/publish/demo/demo/0/${channel}/0`;
+        
+        try {
+            await fetch(publishUrl, {
+                method: "POST",
+                body: JSON.stringify(obj)
             });
+        } catch(e) {
+            console.error("Senden fehlgeschlagen", e);
         }
     }
 
     function saveAndSync() {
-        localStorage.setItem('vData_s_' + roomName, JSON.stringify(players));
+        localStorage.setItem('vData_n_' + roomName, JSON.stringify(players));
         updateUI();
-        sendDataToNetwork();
+        sendNetworkMessage({ type: "SYNC_DATA", data: players, sender: myClientId });
     }
 
     function setStatusBar(text, color) {
@@ -245,12 +255,12 @@
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
-            localStorage.setItem('sRoomKey', roomName);
+            localStorage.setItem('nRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             
-            players = JSON.parse(localStorage.getItem('vData_s_' + roomName)) || [];
+            players = JSON.parse(localStorage.getItem('vData_n_' + roomName)) || [];
             updateUI();
-            initSupabaseLive();
+            initLiveStream();
         }
     }
 
@@ -368,26 +378,4 @@
             p2.balance -= (p1ChosenScore * multiplier);
         } else if (p2ChosenScore > p1ChosenScore) {
             p2.balance += (p1ChosenScore * multiplier);
-            p1.balance -= (p2ChosenScore * multiplier);
-        } else {
-            alert('Unentschieden!');
-        }
-
-        resetDiceSelection(1); resetDiceSelection(2);
-        globalBellActive = false;
-        document.getElementById('global-bell').classList.remove('active');
-        document.getElementById('global-bell').innerHTML = '🐮 <span>Kuhglocke (Inaktiv)</span>';
-        
-        saveAndSync();
-    }
-
-    function resetGame() {
-        if (confirm('Möchtest du wirklich alle Spieler löschen?')) {
-            players = [];
-            saveAndSync();
-        }
-    }
-</script>
-
-</body>
-</html>
+            p1.
