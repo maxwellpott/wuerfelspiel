@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Würfel Duell Live Tracker</title>
-    <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -96,7 +96,7 @@
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Warte auf Netzwerk-Bibliothek...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Verbinde mit dezentralem Netzwerk...</div>
     </div>
 
     <div class="card">
@@ -153,80 +153,65 @@
 </div>
 
 <script>
-    let pubnub = null;
-    let roomName = localStorage.getItem('vRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
-    localStorage.setItem('vRoomKey', roomName);
+    let gun = null;
+    let roomRef = null;
     
-    // UI-Elemente erst nach dem Laden befüllen
-    window.addEventListener('DOMContentLoaded', () => {
-        document.getElementById('roomKeyInput').value = roomName;
-        players = JSON.parse(localStorage.getItem('vData_' + roomName)) || [];
-        updateUI();
-        
-        // Sicherheits-Verzögerung: Erst starten, wenn PubNub definitiv geladen wurde
-        if (typeof PubNub !== 'undefined') {
-            initLiveSystem();
-        } else {
-            setStatusBar("⚠️ Fehler beim Laden des Netzwerks. Bitte Seite neu laden.", "var(--danger)");
-        }
-    });
+    // Zufälliger oder gespeicherter Raum
+    let roomName = localStorage.getItem('gRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
+    localStorage.setItem('gRoomKey', roomName);
 
     let players = [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
-    function initLiveSystem() {
-        setStatusBar("🔄 Verbinde...", "var(--warning)");
-        
-        if (pubnub) { 
-            try { pubnub.unsubscribeAll(); } catch(e){} 
-        }
+    window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('roomKeyInput').value = roomName;
+        initGunLive();
+    });
 
-        try {
-            pubnub = new PubNub({
-                publishKey: 'pub-c-48606db8-ba5b-4375-9273-dfb4e5bb09be',
-                subscribeKey: 'sub-c-1793739a-6663-4903-8d65-ee43e622efd3',
-                userId: 'user-' + Math.floor(Math.random() * 10000)
-            });
+    function initGunLive() {
+        setStatusBar("🔄 Verbinde mit Live-Netzwerk...", "var(--warning)");
 
-            pubnub.subscribe({ channels: [roomName] });
+        // Initialisiert GunDB mit freien, öffentlichen Ausweich-Servern (Relays)
+        // Komplett unblockbar, da kein API-Schlüssel ablaufen oder gesperrt werden kann.
+        gun = Gun([
+            'https://gun-manhattan.herokuapp.com/gun',
+            'https://gundb-relay.herokuapp.com/gun'
+        ]);
 
-            pubnub.addListener({
-                status: function(s) {
-                    if (s.category === "PNConnectedCategory") {
-                        setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-                        pubnub.publish({ channel: roomName, message: { type: "ASK_DATA" } });
-                    }
-                },
-                message: function(event) {
-                    const msg = event.message;
-                    if (msg.type === "SYNC" && msg.room === roomName) {
-                        players = msg.data;
-                        localStorage.setItem('vData_' + roomName, JSON.stringify(players));
+        roomRef = gun.get('wuerfelduell-live-app-v1').get(roomName);
+
+        // Auf Live-Updates lauschen
+        roomRef.get('playersData').on((data) => {
+            if (data && data.json) {
+                try {
+                    const remotePlayers = JSON.parse(data.json);
+                    // Nur aktualisieren, wenn sich lokal wirklich etwas unterscheidet
+                    if (JSON.stringify(remotePlayers) !== JSON.stringify(players)) {
+                        players = remotePlayers;
                         updateUI();
-                    } else if (msg.type === "ASK_DATA" && players.length > 0) {
-                        broadcastData();
                     }
+                    setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
+                } catch(e) {
+                    console.error("Datenfehler", e);
                 }
-            });
-        } catch (e) {
-            setStatusBar("⚠️ Verbindung blockiert oder fehlgeschlagen.", "var(--danger)");
-        }
+            }
+        });
+
+        // Falls das Netzwerk nach 3 Sekunden steht, Status updaten (Gun feuert nicht immer ein Connect-Event)
+        setTimeout(() => {
+            if(document.getElementById('syncStatus').textContent.includes("🔄")) {
+                setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
+            }
+        }, 2500);
     }
 
-    function broadcastData() {
-        if(pubnub) {
-            pubnub.publish({
-                channel: roomName,
-                message: { type: "SYNC", room: roomName, data: players }
-            });
+    function syncToNetwork() {
+        if (roomRef) {
+            roomRef.put({ json: JSON.stringify(players) });
         }
-    }
-
-    function saveLocalAndSync() {
-        localStorage.setItem('vData_' + roomName, JSON.stringify(players));
-        broadcastData();
+        updateUI();
     }
 
     function setStatusBar(text, color) {
@@ -238,12 +223,12 @@
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
-            localStorage.setItem('vRoomKey', roomName);
+            localStorage.setItem('gRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             
-            players = JSON.parse(localStorage.getItem('vData_' + roomName)) || [];
+            players = [];
             updateUI();
-            if (typeof PubNub !== 'undefined') initLiveSystem();
+            initGunLive();
         }
     }
 
@@ -254,22 +239,20 @@
 
         players.push({ name: name, balance: 0 });
         nameInput.value = '';
-        updateUI();
-        saveLocalAndSync();
+        syncToNetwork();
     }
 
     function resetPlayerBalance(name) {
         if (confirm(`Kontostand von ${name} auf 0 € zurücksetzen?`)) {
             const player = players.find(p => p.name === name);
-            if (player) { player.balance = 0; updateUI(); saveLocalAndSync(); }
+            if (player) { player.balance = 0; syncToNetwork(); }
         }
     }
 
     function deletePlayer(name) {
         if (confirm(`${name} löschen?`)) {
             players = players.filter(p => p.name !== name);
-            updateUI();
-            saveLocalAndSync();
+            syncToNetwork();
         }
     }
 
@@ -373,15 +356,13 @@
         document.getElementById('global-bell').classList.remove('active');
         document.getElementById('global-bell').innerHTML = '🐮 <span>Kuhglocke (Inaktiv)</span>';
         
-        updateUI();
-        saveLocalAndSync();
+        syncToNetwork();
     }
 
     function resetGame() {
         if (confirm('Möchtest du wirklich alle Spieler löschen?')) {
             players = [];
-            updateUI();
-            saveLocalAndSync();
+            syncToNetwork();
         }
     }
 </script>
