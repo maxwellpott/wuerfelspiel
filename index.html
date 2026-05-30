@@ -25,7 +25,9 @@ body {
     color: var(--dark);
 }
 
-.container { max-width: 520px; margin: auto; }
+.container { max-width: 500px; margin: auto; }
+
+h1,h2 { text-align:center; }
 
 .card {
     background:white;
@@ -37,7 +39,7 @@ body {
 
 .flex-group { display:flex; gap:10px; }
 
-input, select {
+input,select {
     width:100%;
     padding:10px;
     border:1px solid var(--gray);
@@ -79,6 +81,7 @@ button:hover { opacity:0.9; }
     font-size:30px;
     background:white;
     border:2px solid var(--gray);
+    padding:5px;
 }
 
 .selected-p1 { background:var(--primary); color:white; }
@@ -95,40 +98,41 @@ button:hover { opacity:0.9; }
 
 <div class="container">
 
-<h1>🎲 Würfel Live</h1>
+<h1>🎲 Würfel Duell</h1>
 
 <div class="card">
-    <input id="roomInput" placeholder="Raum-Code">
-    <button onclick="joinRoom()">Raum verbinden</button>
+    <input id="roomKeyInput" placeholder="Raum-Code">
+    <button onclick="connectRoom()">Verbinden</button>
 </div>
 
 <div class="card">
-    <input id="name" placeholder="Spieler Name">
+    <input id="playerName" placeholder="Spieler Name">
     <button onclick="addPlayer()">Hinzufügen</button>
 </div>
 
 <div class="card">
-    <h3>Duell</h3>
+    <h2>Duell</h2>
 
-    <select id="p1"></select>
+    <select id="p1Select"></select>
+
     <div class="dice-grid">
-        <button onclick="pick(1,1)">⚀</button>
-        <button onclick="pick(1,2)">⚁</button>
-        <button onclick="pick(1,3)">⚂</button>
-        <button onclick="pick(1,4)">⚃</button>
-        <button onclick="pick(1,5)">⚄</button>
-        <button onclick="pick(1,6)">⚅</button>
+        <button onclick="selectDice(1,1)">⚀</button>
+        <button onclick="selectDice(1,2)">⚁</button>
+        <button onclick="selectDice(1,3)">⚂</button>
+        <button onclick="selectDice(1,4)">⚃</button>
+        <button onclick="selectDice(1,5)">⚄</button>
+        <button onclick="selectDice(1,6)">⚅</button>
     </div>
 
-    <select id="p2" style="margin-top:10px;"></select>
+    <select id="p2Select" style="margin-top:10px;"></select>
 
     <div class="dice-grid">
-        <button onclick="pick(2,1)">⚀</button>
-        <button onclick="pick(2,2)">⚁</button>
-        <button onclick="pick(2,3)">⚂</button>
-        <button onclick="pick(2,4)">⚃</button>
-        <button onclick="pick(2,5)">⚄</button>
-        <button onclick="pick(2,6)">⚅</button>
+        <button onclick="selectDice(2,1)">⚀</button>
+        <button onclick="selectDice(2,2)">⚁</button>
+        <button onclick="selectDice(2,3)">⚂</button>
+        <button onclick="selectDice(2,4)">⚃</button>
+        <button onclick="selectDice(2,5)">⚄</button>
+        <button onclick="selectDice(2,6)">⚅</button>
     </div>
 
     <button onclick="evaluate()" style="margin-top:10px; background:var(--success); width:100%;">
@@ -137,7 +141,7 @@ button:hover { opacity:0.9; }
 </div>
 
 <div class="card">
-    <h3>Leaderboard</h3>
+    <h2>Leaderboard</h2>
     <ul id="list" class="player-list"></ul>
 </div>
 
@@ -147,140 +151,115 @@ button:hover { opacity:0.9; }
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
 import {
-    getFirestore,
-    collection,
-    doc,
-    setDoc,
-    updateDoc,
-    deleteDoc,
-    onSnapshot
+  getFirestore,
+  doc,
+  setDoc,
+  onSnapshot
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyBrQNvEaEmYO8--EnY6AEOZ6fjsxSDw-fg",
-    authDomain: "wuerfelspiel-fac6c.firebaseapp.com",
-    projectId: "wuerfelspiel-fac6c",
-    storageBucket: "wuerfelspiel-fac6c.firebasestorage.app",
-    messagingSenderId: "170655614346",
-    appId: "1:170655614346:web:cf3fc483f403d9b4c2f473",
-    measurementId: "G-QC51REHX77"
+  apiKey: "DEIN KEY",
+  authDomain: "wuerfelspiel-fac6c.firebaseapp.com",
+  projectId: "wuerfelspiel-fac6c",
+  storageBucket: "wuerfelspiel-fac6c.firebasestorage.app",
+  messagingSenderId: "170655614346",
+  appId: "1:170655614346:web:cf3fc483f403d9b4c2f473"
 };
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-let room = localStorage.getItem("room") || "default";
+let room = "default";
 let players = [];
+let p1 = 0;
+let p2 = 0;
 
-let p1Score = 0;
-let p2Score = 0;
-
-document.getElementById("roomInput").value = room;
-
-function playersRef() {
-    return collection(db, "rooms", room, "players");
+function roomRef() {
+  return doc(db, "rooms", room);
 }
 
-/* ---------------- LIVE SYNC ---------------- */
-
+/* 🔥 LIVE SYNC */
 function listen() {
-    onSnapshot(playersRef(), snap => {
-        players = snap.docs.map(d => d.data());
-        render();
-    });
+  onSnapshot(roomRef(), (snap) => {
+    if (!snap.exists()) return;
+    players = snap.data().players || [];
+    render();
+  });
 }
 
 listen();
 
-/* ---------------- ROOM ---------------- */
-
-window.joinRoom = function () {
-    room = document.getElementById("roomInput").value.trim();
-    localStorage.setItem("room", room);
-    listen();
+/* ROOM */
+window.connectRoom = function () {
+  room = document.getElementById("roomKeyInput").value.trim();
+  if (!room) return;
+  listen();
 };
 
-/* ---------------- PLAYER ---------------- */
-
-window.addPlayer = async function () {
-    const name = document.getElementById("name").value.trim();
-    if (!name) return;
-
-    await setDoc(doc(db, "rooms", room, "players", name), {
-        name,
-        balance: 0
-    });
-};
-
-/* ---------------- RENDER ---------------- */
-
-function render() {
-    const list = document.getElementById("list");
-    const p1 = document.getElementById("p1");
-    const p2 = document.getElementById("p2");
-
-    list.innerHTML = "";
-    p1.innerHTML = "";
-    p2.innerHTML = "";
-
-    players.forEach(p => {
-
-        p1.innerHTML += `<option>${p.name}</option>`;
-        p2.innerHTML += `<option>${p.name}</option>`;
-
-        list.innerHTML += `
-            <li class="player-item">
-                ${p.name}
-                <span>${p.balance}€</span>
-            </li>
-        `;
-    });
+/* SAVE */
+async function save() {
+  await setDoc(roomRef(), { players });
 }
 
-/* ---------------- DICE ---------------- */
+/* PLAYER */
+window.addPlayer = async function () {
+  const name = document.getElementById("playerName").value.trim();
+  if (!name) return;
 
-window.pick = function (player, val) {
-    if (player === 1) p1Score = val;
-    else p2Score = val;
+  players.push({ name, balance: 0 });
+  await save();
 };
 
-/* ---------------- MATCH ---------------- */
+/* RENDER */
+function render() {
+  const list = document.getElementById("list");
+  const p1s = document.getElementById("p1Select");
+  const p2s = document.getElementById("p2Select");
 
+  list.innerHTML = "";
+  p1s.innerHTML = "";
+  p2s.innerHTML = "";
+
+  players.forEach(p => {
+
+    p1s.innerHTML += `<option>${p.name}</option>`;
+    p2s.innerHTML += `<option>${p.name}</option>`;
+
+    list.innerHTML += `
+      <li class="player-item">
+        ${p.name}
+        <span>${p.balance}€</span>
+      </li>
+    `;
+  });
+}
+
+/* DICE */
+window.selectDice = function (player, val) {
+  if (player === 1) p1 = val;
+  else p2 = val;
+};
+
+/* MATCH */
 window.evaluate = async function () {
 
-    const p1 = document.getElementById("p1").value;
-    const p2 = document.getElementById("p2").value;
+  const aName = document.getElementById("p1Select").value;
+  const bName = document.getElementById("p2Select").value;
 
-    if (!p1 || !p2 || p1 === p2) return;
+  const a = players.find(x => x.name === aName);
+  const b = players.find(x => x.name === bName);
 
-    const a = players.find(x => x.name === p1);
-    const b = players.find(x => x.name === p2);
+  if (!a || !b || p1 === 0 || p2 === 0) return;
 
-    if (!a || !b) return;
+  if (p1 > p2) {
+    a.balance += p2;
+    b.balance -= p1;
+  } else if (p2 > p1) {
+    b.balance += p1;
+    a.balance -= p2;
+  }
 
-    if (p1Score > p2Score) {
-
-        await updateDoc(doc(db,"rooms",room,"players",p1), {
-            balance: a.balance + p2Score
-        });
-
-        await updateDoc(doc(db,"rooms",room,"players",p2), {
-            balance: b.balance - p1Score
-        });
-
-    } else if (p2Score > p1Score) {
-
-        await updateDoc(doc(db,"rooms",room,"players",p2), {
-            balance: b.balance + p1Score
-        });
-
-        await updateDoc(doc(db,"rooms",room,"players",p1), {
-            balance: a.balance - p2Score
-        });
-    }
-
-    p1Score = 0;
-    p2Score = 0;
+  await save();
 };
 
 </script>
