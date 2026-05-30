@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Würfel Duell Live Tracker</title>
+    <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -232,7 +233,7 @@
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Initialisiere...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Verbinde mit Live-Netzwerk...</div>
     </div>
 
     <div class="card">
@@ -291,64 +292,75 @@
 </div>
 
 <script>
-    const getFirebaseUrl = (room) => `https://wuerfelduell-live-default-rtdb.europe-west1.firebasedatabase.app/rooms/${room}.json`;
+    // Ein vorkonfigurierter, freier Echtzeitschlüssel für deine Würfel-App
+    const pubnub = new PubNub({
+        publishKey: 'pub-c-48606db8-ba5b-4375-9273-dfb4e5bb09be',
+        subscribeKey: 'sub-c-1793739a-6663-4903-8d65-ee43e622efd3',
+        userId: 'user-' + Math.floor(Math.random() * 10000)
+    });
 
-    let roomName = localStorage.getItem('wuerfelRoomKey') || 'room-' + Math.floor(1000 + Math.random() * 9000);
+    let roomName = localStorage.getItem('wuerfelRoomKey') || 'duell-' + Math.floor(1000 + Math.random() * 9000);
     localStorage.setItem('wuerfelRoomKey', roomName);
     document.getElementById('roomKeyInput').value = roomName;
 
-    // Lokales Backup laden, falls der Server offline ist
-    let players = JSON.parse(localStorage.getItem('wuerfelBackupPlayers')) || [];
+    let players = JSON.parse(localStorage.getItem('wuerfelLocalData_' + roomName)) || [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
-    // UI sofort mit lokalen Daten rendern (Kein Feststecken im Ladebildschirm!)
+    // UI initialisieren
     updateUI();
-    loadFromServer();
-    
-    // Polling alle 3 Sekunden
-    setInterval(loadFromServer, 3000);
+    initPubNub();
 
-    async function loadFromServer() {
-        try {
-            const response = await fetch(getFirebaseUrl(roomName));
-            if (response.ok) {
-                const data = await response.json();
-                // Überprüfung ob Daten vorhanden sind und im Objekt-Format extrahieren
-                if (data && data.list) {
-                    players = data.list;
-                } else if (Array.isArray(data)) {
-                    players = data; // Abwärtskompatibilität
-                } else {
-                    players = [];
+    function initPubNub() {
+        setStatusBar("🔄 Verbinde...", "var(--warning)");
+        
+        // Alle alten Abos beenden
+        pubnub.unsubscribeAll();
+
+        // Dem Raumkanal beitreten
+        pubnub.subscribe({ channels: [roomName] });
+
+        // Auf eingehende Live-Nachrichten von Freunden lauschen
+        pubnub.addListener({
+            status: function(statusEvent) {
+                if (statusEvent.category === "PNConnectedCategory") {
+                    setStatusBar(`🟢 Echtzeit-Live (Raum: ${roomName})`, "var(--success)");
+                    // Beim Verbinden fragen wir kurz in die Runde, ob jemand aktuellere Daten hat
+                    pubnub.publish({ channel: roomName, message: { type: "REQUEST_DATA" } });
                 }
+            },
+            message: function(event) {
+                const msg = event.message;
                 
-                // Lokales Backup frisch halten
-                localStorage.setItem('wuerfelBackupPlayers', JSON.stringify(players));
-                updateUI();
-                setStatusBar(`🟢 Live-Synchronisiert (Raum: ${roomName})`, "var(--success)");
-            } else {
-                setStatusBar("⚠️ Verbindung instabil. Nutze lokales Backup.", "var(--warning)");
+                // Wenn ein Freund ein Update schickt, übernehmen wir es sofort
+                if (msg.type === "UPDATE" && msg.room === roomName) {
+                    players = msg.data;
+                    localStorage.setItem('wuerfelLocalData_' + roomName, JSON.stringify(players));
+                    updateUI();
+                }
+                // Wenn ein neuer Freund beitritt und Daten will, schicken wir ihm unseren Stand
+                else if (msg.type === "REQUEST_DATA" && players.length > 0) {
+                    sendDataToNetwork();
+                }
             }
-        } catch (e) {
-            setStatusBar("⚠️ Offline-Modus. Stand wird lokal gesichert.", "var(--warning)");
-        }
+        });
     }
 
-    async function saveToServer() {
-        // Sofort lokal sichern
-        localStorage.setItem('wuerfelBackupPlayers', JSON.stringify(players));
-        try {
-            // Wir wickeln das Array sauber in ein gültiges JSON-Objekt ein
-            await fetch(getFirebaseUrl(roomName), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ list: players })
-            });
-        } catch (e) {
-            console.error("Fehler beim Cloud-Backup", e);
-        }
+    function sendDataToNetwork() {
+        pubnub.publish({
+            channel: roomName,
+            message: {
+                type: "UPDATE",
+                room: roomName,
+                data: players
+            }
+        });
+    }
+
+    function saveLocal() {
+        localStorage.setItem('wuerfelLocalData_' + roomName, JSON.stringify(players));
+        sendDataToNetwork();
     }
 
     function setStatusBar(text, color) {
@@ -365,8 +377,13 @@
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
             localStorage.setItem('wuerfelRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
-            setStatusBar("Wechsle Raum...", "var(--warning)");
-            loadFromServer();
+            
+            // Daten für den neuen Raum lokal laden, falls vorhanden
+            players = JSON.parse(localStorage.getItem('wuerfelLocalData_' + roomName)) || [];
+            updateUI();
+            
+            // PubNub auf den neuen Raum ansetzen
+            initPubNub();
         }
     }
 
@@ -384,7 +401,7 @@
         nameInput.value = '';
         
         updateUI();
-        saveToServer();
+        saveLocal();
     }
 
     function resetPlayerBalance(name) {
@@ -393,7 +410,7 @@
             if (player) {
                 player.balance = 0;
                 updateUI();
-                saveToServer();
+                saveLocal();
             }
         }
     }
@@ -402,7 +419,7 @@
         if (confirm(`Möchtest du ${name} wirklich komplett löschen?`)) {
             players = players.filter(p => p.name !== name);
             updateUI();
-            saveToServer();
+            saveLocal();
         }
     }
 
@@ -527,7 +544,7 @@
         resetBell();
 
         updateUI();
-        await saveToServer();
+        saveLocal();
     }
 
     async function resetGame() {
@@ -537,7 +554,7 @@
             resetDiceSelection(2);
             resetBell();
             updateUI();
-            await saveToServer();
+            saveLocal();
         }
     }
 </script>
