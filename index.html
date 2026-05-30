@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Würfel Duell Live Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/bugout@1.0.1/bugout.min.js"></script>
+    <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -25,16 +25,8 @@
             padding: 15px;
         }
 
-        .container {
-            max-width: 500px;
-            margin: 0 auto;
-        }
-
-        h1, h2 {
-            text-align: center;
-            color: var(--dark);
-            margin-top: 10px;
-        }
+        .container { max-width: 500px; margin: 0 auto; }
+        h1, h2 { text-align: center; color: var(--dark); margin-top: 10px; }
 
         .card {
             background: white;
@@ -44,97 +36,26 @@
             margin-bottom: 20px;
         }
 
-        .flex-group {
-            display: flex;
-            gap: 10px;
-        }
-
-        input, select {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 10px;
-            border: 1px solid var(--gray);
-            border-radius: 6px;
-            font-size: 16px;
-            background: white;
-        }
-
-        button {
-            background-color: var(--primary);
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            border-radius: 6px;
-            font-size: 16px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-
+        .flex-group { display: flex; gap: 10px; }
+        input, select { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--gray); border-radius: 6px; font-size: 16px; background: white; }
+        button { background-color: var(--primary); color: white; border: none; padding: 10px 15px; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; }
         button:hover { opacity: 0.9; }
 
-        .player-list {
-            list-style: none;
-            padding: 0;
-        }
-
-        .player-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 5px;
-            border-bottom: 1px solid #e2e8f0;
-        }
-
-        .player-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .balance {
-            font-weight: bold;
-            margin-right: 5px;
-        }
+        .player-list { list-style: none; padding: 0; }
+        .player-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 5px; border-bottom: 1px solid #e2e8f0; }
+        .player-info { display: flex; align-items: center; gap: 12px; }
+        .balance { font-weight: bold; margin-right: 5px; }
         .plus { color: var(--success); }
         .minus { color: var(--danger); }
 
-        .btn-action {
-            background: none;
-            border: none;
-            padding: 5px;
-            font-size: 16px;
-            cursor: pointer;
-        }
-        
+        .btn-action { background: none; border: none; padding: 5px; font-size: 16px; cursor: pointer; }
         .btn-reset-single { color: var(--warning); }
         .btn-delete { color: var(--danger); }
 
-        .match-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 15px;
-        }
-
-        .player-box {
-            background: #f1f5f9;
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-        }
-
-        .player-box label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-
-        .dice-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 8px;
-            margin-top: 12px;
-        }
+        .match-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+        .player-box { background: #f1f5f9; padding: 10px; border-radius: 8px; text-align: center; }
+        .player-box label { display: block; margin-bottom: 8px; font-weight: bold; }
+        .dice-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
 
         .dice-btn {
             background: white;
@@ -145,80 +66,22 @@
             font-size: 36px;
             line-height: 1;
             transition: all 0.15s ease-in-out;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            display: flex; justify-content: center; align-items: center;
         }
 
-        .dice-btn.selected-p1 {
-            background-color: var(--primary);
-            color: white;
-            border-color: var(--primary);
-            transform: scale(1.05);
-        }
+        .dice-btn.selected-p1 { background-color: var(--primary); color: white; border-color: var(--primary); transform: scale(1.05); }
+        .dice-btn.selected-p2 { background-color: #6366f1; color: white; border-color: #6366f1; transform: scale(1.05); }
 
-        .dice-btn.selected-p2 {
-            background-color: #6366f1;
-            color: white;
-            border-color: #6366f1;
-            transform: scale(1.05);
-        }
-
-        .global-cowbell-wrapper {
-            margin: 15px 0;
-            text-align: center;
-        }
-
+        .global-cowbell-wrapper { margin: 15px 0; text-align: center; }
         .cowbell-btn {
-            width: 100%;
-            background: white;
-            color: #64748b;
-            border: 2px solid var(--gray);
-            border-radius: 10px;
-            padding: 12px 0;
-            font-size: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            font-weight: normal;
-            transition: all 0.15s ease;
+            width: 100%; background: white; color: #64748b; border: 2px solid var(--gray); border-radius: 10px;
+            padding: 12px 0; font-size: 20px; display: flex; justify-content: center; align-items: center; gap: 10px; transition: all 0.15s ease;
         }
 
-        .cowbell-btn span {
-            font-size: 16px;
-            font-weight: bold;
-        }
-
-        .cowbell-btn.active {
-            background-color: var(--cow-gold);
-            color: #000;
-            border-color: var(--cow-gold);
-            box-shadow: 0 4px 10px rgba(234, 179, 8, 0.4);
-            font-weight: bold;
-        }
-
-        .btn-submit {
-            width: 100%;
-            background-color: var(--success);
-            padding: 14px;
-            font-size: 18px;
-            margin-bottom: 10px;
-        }
-
-        .btn-reset {
-            width: 100%;
-            background-color: #64748b;
-            padding: 8px;
-            font-size: 14px;
-        }
-
-        .status-bar {
-            font-size: 11px;
-            text-align: center;
-            color: #64748b;
-            margin-bottom: 10px;
-        }
+        .cowbell-btn.active { background-color: var(--cow-gold); color: #000; border-color: var(--cow-gold); box-shadow: 0 4px 10px rgba(234, 179, 8, 0.4); font-weight: bold; }
+        .btn-submit { width: 100%; background-color: var(--success); padding: 14px; font-size: 18px; margin-bottom: 10px; }
+        .btn-reset { width: 100%; background-color: #64748b; padding: 8px; font-size: 14px; }
+        .status-bar { font-size: 11px; text-align: center; color: #64748b; margin-bottom: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -228,12 +91,12 @@
 
     <div class="card" style="background: #e0f2fe; border: 1px solid #7dd3fc;">
         <h3 style="margin-top:0; margin-bottom:8px; text-align:center; color:#0369a1;">👥 Gemeinsam spielen</h3>
-        <p style="font-size:13px; margin: 0 0 10px 0; text-align:center; color:#0c4a6e;">Nutze den Standard-Raumcode oder erstelle einen eigenen:</p>
+        <p style="font-size:13px; margin: 0 0 10px 0; text-align:center; color:#0c4a6e;">Nutzt alle denselben Code, um eure Kontostände live zu synchronisieren:</p>
         <div class="flex-group">
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Suche andere Spieler...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Verbinde mit Live-Netzwerk...</div>
     </div>
 
     <div class="card">
@@ -250,7 +113,6 @@
             <div class="player-box">
                 <label for="p1Select">Spieler 1</label>
                 <select id="p1Select" onchange="resetDiceSelection(1)"></select>
-                
                 <div class="dice-grid">
                     <button class="dice-btn" id="p1-d1" onclick="selectDice(1, 1)">⚀</button>
                     <button class="dice-btn" id="p1-d2" onclick="selectDice(1, 2)">⚁</button>
@@ -264,7 +126,6 @@
             <div class="player-box">
                 <label for="p2Select">Spieler 2</label>
                 <select id="p2Select" onchange="resetDiceSelection(2)"></select>
-                
                 <div class="dice-grid">
                     <button class="dice-btn" id="p2-d1" onclick="selectDice(2, 1)">⚀</button>
                     <button class="dice-btn" id="p2-d2" onclick="selectDice(2, 2)">⚁</button>
@@ -292,130 +153,115 @@
 </div>
 
 <script>
-    let b = null;
-    let roomName = localStorage.getItem('wuerfelRoomKey') || 'duell-347365';
-    localStorage.setItem('wuerfelRoomKey', roomName);
+    let pubnub = null;
+    // Zufälliger Raum beim ersten Start, falls keiner existiert
+    let roomName = localStorage.getItem('vRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
+    localStorage.setItem('vRoomKey', roomName);
     document.getElementById('roomKeyInput').value = roomName;
 
-    // Daten werden primär lokal gespeichert, damit die App SOFORT flüssig nutzbar ist
-    let players = JSON.parse(localStorage.getItem('wuerfelP2P_' + roomName)) || [];
+    let players = JSON.parse(localStorage.getItem('vData_' + roomName)) || [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
-    // UI sofort laden
     updateUI();
-    initP2P();
 
-    function initP2P() {
-        setStatusBar("🔄 Verbinde direkt mit Mitspielern...", "var(--warning)");
+    // Wir warten kurz, bis die Seite da ist, dann verbinden wir
+    window.addEventListener('DOMContentLoaded', () => {
+        initLiveSystem();
+    });
+
+    function initLiveSystem() {
+        setStatusBar("🔄 Verbinde...", "var(--warning)");
         
-        if (b) { try { b.destroy(); } catch(e){} }
+        if (pubnub) { pubnub.unsubscribeAll(); }
 
-        // Wir erstellen ein dezentrales Peer-Netzwerk basierend auf dem Raumnamen
-        // Komplett ohne externe API-Keys oder Server-Konten!
-        b = new Bugout(roomName);
-
-        // Sobald wir einen anderen Spieler im selben Raum finden
-        b.on("seen", (address) => {
-            setStatusBar(`🟢 Verbunden mit Mitspieler! (Raum: ${roomName})`, "var(--success)");
-            // Fordere die aktuellen Daten der anderen an
-            b.send({ type: "PING" });
+        // Initialisiert die Live-Leitung
+        pubnub = new PubNub({
+            publishKey: 'pub-c-48606db8-ba5b-4375-9273-dfb4e5bb09be',
+            subscribeKey: 'sub-c-1793739a-6663-4903-8d65-ee43e622efd3',
+            userId: 'user-' + Math.floor(Math.random() * 10000)
         });
 
-        // Wenn wir eine Nachricht von einem Freund erhalten
-        b.on("message", (address, msg) => {
-            if (msg && msg.type === "UPDATE") {
-                // Nur aktualisieren, wenn die empfangenen Daten neuer oder länger sind
-                if (msg.data && JSON.stringify(msg.data) !== JSON.stringify(players)) {
-                    players = msg.data;
-                    localStorage.setItem('wuerfelP2P_' + roomName, JSON.stringify(players));
-                    updateUI();
+        pubnub.subscribe({ channels: [roomName] });
+
+        pubnub.addListener({
+            status: function(s) {
+                if (s.category === "PNConnectedCategory") {
+                    setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
+                    // Beim Beitritt fragen, ob schon Daten im Raum existieren
+                    pubnub.publish({ channel: roomName, message: { type: "ASK_DATA" } });
                 }
-                setStatusBar(`🟢 Synchronisiert (Raum: ${roomName})`, "var(--success)");
-            } else if (msg && msg.type === "PING") {
-                // Jemand fragt nach unseren Daten -> Sende sie ihm direkt rüber
-                broadcastData();
+            },
+            message: function(event) {
+                const msg = event.message;
+                if (msg.type === "SYNC" && msg.room === roomName) {
+                    players = msg.data;
+                    localStorage.setItem('vData_' + roomName, JSON.stringify(players));
+                    updateUI();
+                } else if (msg.type === "ASK_DATA" && players.length > 0) {
+                    // Ein Freund ist beigetreten und braucht den aktuellen Stand
+                    broadcastData();
+                }
             }
         });
-
-        // Falls nach 5 Sekunden niemand online ist, ist das auch okay (man ist der Erste im Raum)
-        setTimeout(() => {
-            if(document.getElementById('syncStatus').textContent.includes("🔄")) {
-                setStatusBar(`🟢 Bereit im Raum: ${roomName} (Warte auf Freunde...)`, "var(--success)");
-            }
-        }, 4000);
     }
 
     function broadcastData() {
-        if (b) {
-            b.send({
-                type: "UPDATE",
-                data: players
+        if(pubnub) {
+            pubnub.publish({
+                channel: roomName,
+                message: { type: "SYNC", room: roomName, data: players }
             });
         }
     }
 
-    function saveAndSync() {
-        localStorage.setItem('wuerfelP2P_' + roomName, JSON.stringify(players));
+    function saveLocalAndSync() {
+        localStorage.setItem('vData_' + roomName, JSON.stringify(players));
         broadcastData();
     }
 
     function setStatusBar(text, color) {
         const bar = document.getElementById('syncStatus');
-        if(bar) {
-            bar.textContent = text;
-            bar.style.color = color;
-        }
+        if(bar) { bar.textContent = text; bar.style.color = color; }
     }
 
     function connectToRoom() {
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
-            localStorage.setItem('wuerfelRoomKey', roomName);
+            localStorage.setItem('vRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             
-            players = JSON.parse(localStorage.getItem('wuerfelP2P_' + roomName)) || [];
+            players = JSON.parse(localStorage.getItem('vData_' + roomName)) || [];
             updateUI();
-            
-            initP2P();
+            initLiveSystem();
         }
     }
 
     function addPlayer() {
         const nameInput = document.getElementById('playerName');
         const name = nameInput.value.trim();
-        
-        if (name === '') return;
-        if (players.some(p => p.name === name)) {
-            alert('Spieler existiert bereits!');
-            return;
-        }
+        if (name === '' || players.some(p => p.name === name)) return;
 
         players.push({ name: name, balance: 0 });
         nameInput.value = '';
-        
         updateUI();
-        saveAndSync();
+        saveLocalAndSync();
     }
 
     function resetPlayerBalance(name) {
-        if (confirm(`Möchtest du den Kontostand von ${name} wirklich auf 0 € zurücksetzen?`)) {
+        if (confirm(`Kontostand von ${name} auf 0 € zurücksetzen?`)) {
             const player = players.find(p => p.name === name);
-            if (player) {
-                player.balance = 0;
-                updateUI();
-                saveAndSync();
-            }
+            if (player) { player.balance = 0; updateUI(); saveLocalAndSync(); }
         }
     }
 
     function deletePlayer(name) {
-        if (confirm(`Möchtest du ${name} wirklich komplett löschen?`)) {
+        if (confirm(`${name} löschen?`)) {
             players = players.filter(p => p.name !== name);
             updateUI();
-            saveAndSync();
+            saveLocalAndSync();
         }
     }
 
@@ -433,14 +279,10 @@
     function resetDiceSelection(playerNum) {
         if (playerNum === 1) {
             p1ChosenScore = 0;
-            for (let i = 1; i <= 6; i++) {
-                if(document.getElementById(`p1-d${i}`)) document.getElementById(`p1-d${i}`).classList.remove('selected-p1');
-            }
+            for (let i = 1; i <= 6; i++) { if(document.getElementById(`p1-d${i}`)) document.getElementById(`p1-d${i}`).classList.remove('selected-p1'); }
         } else {
             p2ChosenScore = 0;
-            for (let i = 1; i <= 6; i++) {
-                if(document.getElementById(`p2-d${i}`)) document.getElementById(`p2-d${i}`).classList.remove('selected-p2');
-            }
+            for (let i = 1; i <= 6; i++) { if(document.getElementById(`p2-d${i}`)) document.getElementById(`p2-d${i}`).classList.remove('selected-p2'); }
         }
     }
 
@@ -456,25 +298,14 @@
         }
     }
 
-    function resetBell() {
-        globalBellActive = false;
-        const btn = document.getElementById('global-bell');
-        if(btn) {
-            btn.classList.remove('active');
-            btn.innerHTML = '🐮 <span>Kuhglocke (Inaktiv)</span>';
-        }
-    }
-
     function updateUI() {
         const p1Select = document.getElementById('p1Select');
         const p2Select = document.getElementById('p2Select');
         const leaderboard = document.getElementById('leaderboard');
-
         if(!p1Select || !p2Select || !leaderboard) return;
 
         const currentP1 = p1Select.value;
         const currentP2 = p2Select.value;
-
         players.sort((a, b) => b.balance - a.balance);
 
         p1Select.innerHTML = '<option value="">-- Spieler 1 --</option>';
@@ -482,21 +313,16 @@
         leaderboard.innerHTML = '';
 
         players.forEach(player => {
-            let opt1 = document.createElement('option');
-            opt1.value = player.name;
-            opt1.textContent = player.name;
+            let opt1 = document.createElement('option'); opt1.value = player.name; opt1.textContent = player.name;
             if(player.name === currentP1) opt1.selected = true;
             p1Select.appendChild(opt1);
 
-            let opt2 = document.createElement('option');
-            opt2.value = player.name;
-            opt2.textContent = player.name;
+            let opt2 = document.createElement('option'); opt2.value = player.name; opt2.textContent = player.name;
             if(player.name === currentP2) opt2.selected = true;
             p2Select.appendChild(opt2);
 
             let li = document.createElement('li');
             li.className = 'player-item';
-            
             let formatBalance = player.balance >= 0 ? `+${player.balance} €` : `${player.balance} €`;
             let balanceClass = player.balance >= 0 ? 'plus' : 'minus';
 
@@ -504,8 +330,8 @@
                 <span>${player.name}</span>
                 <div class="player-info">
                     <span class="balance ${balanceClass}">${formatBalance}</span>
-                    <button class="btn-action btn-reset-single" onclick="resetPlayerBalance('${player.name}')" title="Kontostand auf 0 setzen">🔄</button>
-                    <button class="btn-action btn-delete" onclick="deletePlayer('${player.name}')" title="Spieler komplett löschen">🗑️</button>
+                    <button class="btn-action btn-reset-single" onclick="resetPlayerBalance('${player.name}')">🔄</button>
+                    <button class="btn-action btn-delete" onclick="deletePlayer('${player.name}')">🗑️</button>
                 </div>
             `;
             leaderboard.appendChild(li);
@@ -516,13 +342,12 @@
         const p1Name = document.getElementById('p1Select').value;
         const p2Name = document.getElementById('p2Select').value;
 
-        if (!p1Name || !p2Name) { alert('Bitte beide Spieler auswählen!'); return; }
-        if (p1Name === p2Name) { alert('Ein Spieler kann nicht gegen sich selbst spielen!'); return; }
-        if (p1ChosenScore === 0 || p2ChosenScore === 0) { alert('Bitte für beide Spieler einen Würfel auswählen!'); return; }
+        if (!p1Name || !p2Name || p1Name === p2Name || p1ChosenScore === 0 || p2ChosenScore === 0) {
+            alert('Bitte Spieler und Würfel korrekt auswählen!'); return;
+        }
 
         const p1 = players.find(p => p.name === p1Name);
         const p2 = players.find(p => p.name === p2Name);
-
         let multiplier = globalBellActive ? 2 : 1;
 
         if (p1ChosenScore > p2ChosenScore) {
@@ -532,25 +357,23 @@
             p2.balance += (p1ChosenScore * multiplier);
             p1.balance -= (p2ChosenScore * multiplier);
         } else {
-            alert('Unentschieden! Keine Beträge verbucht.');
+            alert('Unentschieden!');
         }
 
-        resetDiceSelection(1);
-        resetDiceSelection(2);
-        resetBell();
-
+        resetDiceSelection(1); resetDiceSelection(2);
+        globalBellActive = false;
+        document.getElementById('global-bell').classList.remove('active');
+        document.getElementById('global-bell').innerHTML = '🐮 <span>Kuhglocke (Inaktiv)</span>';
+        
         updateUI();
-        saveAndSync();
+        saveLocalAndSync();
     }
 
     function resetGame() {
-        if (confirm('Möchtest du wirklich die komplette Liste löschen?')) {
+        if (confirm('Möchtest du wirklich alle Spieler löschen?')) {
             players = [];
-            resetDiceSelection(1);
-            resetDiceSelection(2);
-            resetBell();
             updateUI();
-            saveAndSync();
+            saveLocalAndSync();
         }
     }
 </script>
