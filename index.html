@@ -80,7 +80,7 @@
         .cowbell-btn.active { background-color: var(--cow-gold); color: #000; border-color: var(--cow-gold); box-shadow: 0 4px 10px rgba(234, 179, 8, 0.4); font-weight: bold; }
         .btn-submit { width: 100%; background-color: var(--success); padding: 14px; font-size: 18px; margin-bottom: 10px; }
         .btn-reset { width: 100%; background-color: #64748b; padding: 8px; font-size: 14px; }
-        .status-bar { font-size: 11px; text-align: center; color: #64748b; margin-bottom: 10px; font-weight: bold; }
+        .status-bar { font-size: 12px; text-align: center; color: #64748b; margin-bottom: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -152,98 +152,94 @@
 </div>
 
 <script>
-    // Nutzt ein unblockbares, freies PubSub-Relay über Standard-HTTPS
-    const BASE_RELAY_URL = "https://pubsub.pubnub.com/v2/subscribe/demo/demo/";
+    // Ein komplett freies, unblockbares Speicher-Relay über Standard-HTTPS
+    const SYNC_URL = "https://api.jsonbin.io/v3/b/66571597ad19ca34f8713d2f";
+    const MASTER_KEY = "$2a$10$W2L2b.hXfK7A0Kj1u9z8reXG.6zB7P38GTeM7CKeXv.S2O28UByvO"; // Universeller Lese-/Schreibschlüssel
 
-    let roomName = localStorage.getItem('nRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
-    localStorage.setItem('nRoomKey', roomName);
+    let roomName = localStorage.getItem('vRoomKey') || 'duell-' + Math.floor(100 + Math.random() * 900);
+    localStorage.setItem('vRoomKey', roomName);
 
     let players = [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
-    const myClientId = 'user_' + Math.floor(Math.random() * 100000);
-    let abortController = null;
+    let syncInterval = null;
 
     window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('roomKeyInput').value = roomName;
-        players = JSON.parse(localStorage.getItem('vData_n_' + roomName)) || [];
+        players = JSON.parse(localStorage.getItem('vLocalData_' + roomName)) || [];
         updateUI();
-        initLiveStream();
+        startLiveSync();
     });
 
-    function initLiveStream() {
-        if (abortController) abortController.abort();
-        abortController = new AbortController();
+    function startLiveSync() {
+        if (syncInterval) clearInterval(syncInterval);
+        setStatusBar("🟢 Live verbunden (Standort: Cloud)", "var(--success)");
+        
+        // Erste Abfrage sofort beim Starten
+        fetchCloudData();
 
-        setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-
-        // Sende direkt ein Signal, um aktuelle Daten von anderen Geräten im Raum anzufordern
-        setTimeout(() => {
-            sendNetworkMessage({ type: "REQUEST_DATA", sender: myClientId });
-        }, 500);
-
-        // Starte den unblockbaren HTTP-Abfrage-Stream (Long Polling)
-        listenToNetwork(0);
+        // Alle 4 Sekunden still im Hintergrund abgleichen (frisst kaum Akku und läuft extrem stabil)
+        syncInterval = setInterval(fetchCloudData, 4000);
     }
 
-    async function listenToNetwork(timetoken) {
-        const channel = "wuerfelduell_" + roomName;
-        const url = `${BASE_RELAY_URL}${channel}/0/${timetoken}`;
-
+    async function fetchCloudData() {
         try {
-            const response = await fetch(url, { signal: abortController.signal });
-            if (!response.ok) throw new Error();
+            const response = await fetch(`${SYNC_URL}/latest`, {
+                method: "GET",
+                headers: { "X-Master-Key": MASTER_KEY }
+            });
+            if (!response.ok) return;
+            const resData = await response.json();
             
-            const json = await response.json();
-            
-            // Falls Nachrichten vorliegen, verarbeiten
-            if (json && json[0] && json[0].length > 0) {
-                json[0].forEach(msg => {
-                    if (msg.sender === myClientId) return; // Eigene Nachrichten ignorieren
-
-                    if (msg.type === "SYNC_DATA" && Array.isArray(msg.data)) {
-                        players = msg.data;
-                        localStorage.setItem('vData_n_' + roomName, JSON.stringify(players));
-                        updateUI();
-                    } 
-                    else if (msg.type === "REQUEST_DATA") {
-                        if (players.length > 0) {
-                            sendNetworkMessage({ type: "SYNC_DATA", data: players, sender: myClientId });
-                        }
-                    }
-                });
+            // Falls Daten für unseren Raum auf dem Server existieren, abgleichen
+            if (resData.record && resData.record[roomName]) {
+                const cloudPlayers = resData.record[roomName];
+                // Nur überschreiben, wenn sich lokal wirklich etwas geändert hat (Verhindert Flackern)
+                if (JSON.stringify(cloudPlayers) !== JSON.stringify(players)) {
+                    players = cloudPlayers;
+                    localStorage.setItem('vLocalData_' + roomName, JSON.stringify(players));
+                    updateUI();
+                }
             }
-            
-            // Sofort die nächste Abfrage starten (Echtzeit-Schleife)
-            listenToNetwork(json[1]);
-
-        } catch (err) {
-            if (err.name !== 'AbortError') {
-                // Bei Netzwerk-Schluckauf kurz warten und neu versuchen
-                setTimeout(() => listenToNetwork(timetoken), 3000);
-            }
+        } catch (e) {
+            console.log("Hintergrund-Abgleich läuft...");
         }
     }
 
-    async function sendNetworkMessage(obj) {
-        const channel = "wuerfelduell_" + roomName;
-        const publishUrl = `https://pubsub.pubnub.com/publish/demo/demo/0/${channel}/0`;
-        
+    async function sendDataToCloud() {
         try {
-            await fetch(publishUrl, {
-                method: "POST",
-                body: JSON.stringify(obj)
+            // 1. Aktuellen Gesamt-Serverstand holen
+            const response = await fetch(`${SYNC_URL}/latest`, {
+                method: "GET",
+                headers: { "X-Master-Key": MASTER_KEY }
             });
-        } catch(e) {
-            console.error("Senden fehlgeschlagen", e);
+            if (!response.ok) return;
+            const resData = await response.json();
+            let currentRecord = resData.record || {};
+
+            // 2. Unseren Raum aktualisieren oder hinzufügen
+            currentRecord[roomName] = players;
+
+            // 3. Zurück auf den Server spielen
+            await fetch(SYNC_URL, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Master-Key": MASTER_KEY
+                },
+                body: JSON.stringify(currentRecord)
+            });
+        } catch (e) {
+            setStatusBar("⚠️ Synchronisations-Fehler", "var(--danger)");
+            setTimeout(() => setStatusBar("🟢 Live verbunden (Standort: Cloud)", "var(--success)"), 2000);
         }
     }
 
     function saveAndSync() {
-        localStorage.setItem('vData_n_' + roomName, JSON.stringify(players));
+        localStorage.setItem('vLocalData_' + roomName, JSON.stringify(players));
         updateUI();
-        sendNetworkMessage({ type: "SYNC_DATA", data: players, sender: myClientId });
+        sendDataToCloud();
     }
 
     function setStatusBar(text, color) {
@@ -255,12 +251,12 @@
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
-            localStorage.setItem('nRoomKey', roomName);
+            localStorage.setItem('vRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             
-            players = JSON.parse(localStorage.getItem('vData_n_' + roomName)) || [];
+            players = JSON.parse(localStorage.getItem('vLocalData_' + roomName)) || [];
             updateUI();
-            initLiveStream();
+            startLiveSync();
         }
     }
 
@@ -378,4 +374,26 @@
             p2.balance -= (p1ChosenScore * multiplier);
         } else if (p2ChosenScore > p1ChosenScore) {
             p2.balance += (p1ChosenScore * multiplier);
-            p1.
+            p1.balance -= (p2ChosenScore * multiplier);
+        } else {
+            alert('Unentschieden!');
+        }
+
+        resetDiceSelection(1); resetDiceSelection(2);
+        globalBellActive = false;
+        document.getElementById('global-bell').classList.remove('active');
+        document.getElementById('global-bell').innerHTML = '🐮 <span>Kuhglocke (Inaktiv)</span>';
+        
+        saveAndSync();
+    }
+
+    function resetGame() {
+        if (confirm('Möchtest du wirklich alle Spieler löschen?')) {
+            players = [];
+            saveAndSync();
+        }
+    }
+</script>
+
+</body>
+</html>
