@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Würfel Duell Live Tracker</title>
-    <script src="https://unpkg.com/piesocket-js@3"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -153,82 +153,88 @@
 </div>
 
 <script>
-    let pieSocketChannel = null;
-    let roomName = localStorage.getItem('pRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
-    localStorage.setItem('pRoomKey', roomName);
+    let mqttClient = null;
+    let roomName = localStorage.getItem('mRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
+    localStorage.setItem('mRoomKey', roomName);
 
     let players = [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
+    const myClientId = 'client-' + Math.floor(Math.random() * 100000);
 
     window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('roomKeyInput').value = roomName;
-        // Lokale Daten sofort laden, damit die App direkt startklar ist
-        players = JSON.parse(localStorage.getItem('vData_p_' + roomName)) || [];
+        players = JSON.parse(localStorage.getItem('vData_m_' + roomName)) || [];
         updateUI();
-        initLiveConnection();
+        initMqttConnection();
     });
 
-    function initLiveConnection() {
+    function initMqttConnection() {
         setStatusBar("🔄 Verbinde mit Live-Kanal...", "var(--warning)");
 
-        // Nutzen den freien Demo-Cluster von PieSocket (extrem stabil für Web-Apps)
-        const pieSocket = new PieSocket.default({
-            clusterId: "demo",
-            apiKey: "oCdZl9Z6AswCgxI7vtEwQC22Yw27iY6S767SST6K", // Freier öffentlicher Demokey
-            notifyFromSelf: false
+        if (mqttClient) {
+            try { mqttClient.end(); } catch(e) {}
+        }
+
+        // Sichere SSL-Verbindung über Port 443 erzwingen
+        mqttClient = mqtt.connect('wss://broker.hivemq.com:443/mqtt', {
+            clientId: myClientId,
+            clean: true,
+            connectTimeout: 5000
         });
 
-        // Verbindung zu einem spezifischen Channel (Raum) aufbauen
-        pieSocketChannel = pieSocket.subscribe("wuerfelduell-" + roomName);
+        const topic = "wuerfelduell/live/" + roomName;
 
-        pieSocketChannel.on("open", () => {
+        mqttClient.on('connect', () => {
             setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-            // Sobald wir drin sind, fragen wir die anderen im Raum, ob es bereits Daten gibt
+            mqttClient.subscribe(topic);
+            
+            // Stand abfragen, falls andere Geräte im Raum schon Daten haben
             setTimeout(() => {
-                pieSocketChannel.send(JSON.stringify({ type: "REQUEST_CURRENT_DATA" }));
-            }, 500);
+                publishMessage({ type: "REQUEST_DATA", sender: myClientId });
+            }, 400);
         });
 
-        // Auf eintreffende Nachrichten von Freunden reagieren
-        pieSocketChannel.on("message", (msg) => {
+        mqttClient.on('message', (receivedTopic, payload) => {
             try {
-                const res = JSON.parse(msg.data);
-                
-                if (res.type === "SYNC_DATA") {
-                    const remotePlayers = res.data;
-                    if (remotePlayers && Array.isArray(remotePlayers)) {
-                        players = remotePlayers;
-                        localStorage.setItem('vData_p_' + roomName, JSON.stringify(players));
+                const msg = JSON.parse(payload.toString());
+                if (msg.sender === myClientId) return;
+
+                if (msg.type === "SYNC_DATA") {
+                    if (msg.data && Array.isArray(msg.data)) {
+                        players = msg.data;
+                        localStorage.setItem('vData_m_' + roomName, JSON.stringify(players));
                         updateUI();
                     }
                 } 
-                else if (res.type === "REQUEST_CURRENT_DATA") {
-                    // Jemand ist neu beigetreten und braucht unseren aktuellen Stand
+                else if (msg.type === "REQUEST_DATA") {
                     if (players.length > 0) {
-                        sendDataToNetwork();
+                        publishMessage({ type: "SYNC_DATA", data: players, sender: myClientId });
                     }
                 }
             } catch (e) {
-                console.error("Fehler beim Verarbeiten", e);
+                console.error("Netzwerkfehler", e);
             }
+        });
+
+        mqttClient.on('error', (err) => {
+            console.error("MQTT Fehler:", err);
+            setStatusBar("⚠️ Verbindung unterbrochen. Versuche es erneut...", "var(--danger)");
         });
     }
 
-    function sendDataToNetwork() {
-        if (pieSocketChannel) {
-            pieSocketChannel.send(JSON.stringify({
-                type: "SYNC_DATA",
-                data: players
-            }));
+    function publishMessage(obj) {
+        if (mqttClient && mqttClient.connected) {
+            const topic = "wuerfelduell/live/" + roomName;
+            mqttClient.publish(topic, JSON.stringify(obj));
         }
     }
 
     function saveAndSync() {
-        localStorage.setItem('vData_p_' + roomName, JSON.stringify(players));
+        localStorage.setItem('vData_m_' + roomName, JSON.stringify(players));
         updateUI();
-        sendDataToNetwork();
+        publishMessage({ type: "SYNC_DATA", data: players, sender: myClientId });
     }
 
     function setStatusBar(text, color) {
@@ -240,15 +246,12 @@
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
-            localStorage.setItem('pRoomKey', roomName);
+            localStorage.setItem('mRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             
-            // Erst alte lokale Daten laden, falls vorhanden
-            players = JSON.parse(localStorage.getItem('vData_p_' + roomName)) || [];
+            players = JSON.parse(localStorage.getItem('vData_m_' + roomName)) || [];
             updateUI();
-            
-            // Alten Raum verlassen und neu verbinden
-            initLiveConnection();
+            initMqttConnection();
         }
     }
 
