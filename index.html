@@ -94,6 +94,7 @@
         <div class="flex-group">
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
+            <button onclick="forceUpload()" style="background:#0facf8; padding: 10px 8px;" title="Meine Liste in die Cloud jagen">🔄 Sync!</button>
         </div>
         <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Initialisiere Live-Netzwerk...</div>
     </div>
@@ -152,9 +153,8 @@
 </div>
 
 <script>
-    // Ein komplett freies, unblockbares Speicher-Relay über Standard-HTTPS
     const SYNC_URL = "https://api.jsonbin.io/v3/b/66571597ad19ca34f8713d2f";
-    const MASTER_KEY = "$2a$10$W2L2b.hXfK7A0Kj1u9z8reXG.6zB7P38GTeM7CKeXv.S2O28UByvO"; // Universeller Lese-/Schreibschlüssel
+    const MASTER_KEY = "$2a$10$W2L2b.hXfK7A0Kj1u9z8reXG.6zB7P38GTeM7CKeXv.S2O28UByvO";
 
     let roomName = localStorage.getItem('vRoomKey') || 'duell-' + Math.floor(100 + Math.random() * 900);
     localStorage.setItem('vRoomKey', roomName);
@@ -175,11 +175,7 @@
     function startLiveSync() {
         if (syncInterval) clearInterval(syncInterval);
         setStatusBar("🟢 Live verbunden (Standort: Cloud)", "var(--success)");
-        
-        // Erste Abfrage sofort beim Starten
         fetchCloudData();
-
-        // Alle 4 Sekunden still im Hintergrund abgleichen (frisst kaum Akku und läuft extrem stabil)
         syncInterval = setInterval(fetchCloudData, 4000);
     }
 
@@ -192,10 +188,15 @@
             if (!response.ok) return;
             const resData = await response.json();
             
-            // Falls Daten für unseren Raum auf dem Server existieren, abgleichen
             if (resData.record && resData.record[roomName]) {
                 const cloudPlayers = resData.record[roomName];
-                // Nur überschreiben, wenn sich lokal wirklich etwas geändert hat (Verhindert Flackern)
+                
+                // INTELLIGENTER SCHUTZ: Wenn wir lokal Spieler haben, die Cloud aber leer ist, NICHT überschreiben!
+                if (players.length > 0 && cloudPlayers.length === 0) {
+                    sendDataToCloud(); // Stattdessen unsere vollen Daten hochladen
+                    return;
+                }
+
                 if (JSON.stringify(cloudPlayers) !== JSON.stringify(players)) {
                     players = cloudPlayers;
                     localStorage.setItem('vLocalData_' + roomName, JSON.stringify(players));
@@ -209,7 +210,6 @@
 
     async function sendDataToCloud() {
         try {
-            // 1. Aktuellen Gesamt-Serverstand holen
             const response = await fetch(`${SYNC_URL}/latest`, {
                 method: "GET",
                 headers: { "X-Master-Key": MASTER_KEY }
@@ -218,10 +218,8 @@
             const resData = await response.json();
             let currentRecord = resData.record || {};
 
-            // 2. Unseren Raum aktualisieren oder hinzufügen
             currentRecord[roomName] = players;
 
-            // 3. Zurück auf den Server spielen
             await fetch(SYNC_URL, {
                 method: "PUT",
                 headers: {
@@ -231,9 +229,16 @@
                 body: JSON.stringify(currentRecord)
             });
         } catch (e) {
-            setStatusBar("⚠️ Synchronisations-Fehler", "var(--danger)");
-            setTimeout(() => setStatusBar("🟢 Live verbunden (Standort: Cloud)", "var(--success)"), 2000);
+            console.error("Cloud-Upload fehlgeschlagen", e);
         }
+    }
+
+    // Erzwingt den Upload der lokalen Daten beim Klick auf den Button
+    function forceUpload() {
+        setStatusBar("⚡ Synchronisiere Daten...", "var(--warning)");
+        sendDataToCloud().then(() => {
+            setTimeout(() => setStatusBar("🟢 Live verbunden (Standort: Cloud)", "var(--success)"), 1000);
+        });
     }
 
     function saveAndSync() {
