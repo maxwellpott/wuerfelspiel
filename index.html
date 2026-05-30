@@ -96,7 +96,7 @@
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Verbinde mit Live-Netzwerk...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Warte auf Netzwerk-Bibliothek...</div>
     </div>
 
     <div class="card">
@@ -154,57 +154,65 @@
 
 <script>
     let pubnub = null;
-    // Zufälliger Raum beim ersten Start, falls keiner existiert
     let roomName = localStorage.getItem('vRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
     localStorage.setItem('vRoomKey', roomName);
-    document.getElementById('roomKeyInput').value = roomName;
+    
+    // UI-Elemente erst nach dem Laden befüllen
+    window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('roomKeyInput').value = roomName;
+        players = JSON.parse(localStorage.getItem('vData_' + roomName)) || [];
+        updateUI();
+        
+        // Sicherheits-Verzögerung: Erst starten, wenn PubNub definitiv geladen wurde
+        if (typeof PubNub !== 'undefined') {
+            initLiveSystem();
+        } else {
+            setStatusBar("⚠️ Fehler beim Laden des Netzwerks. Bitte Seite neu laden.", "var(--danger)");
+        }
+    });
 
-    let players = JSON.parse(localStorage.getItem('vData_' + roomName)) || [];
+    let players = [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
-    updateUI();
-
-    // Wir warten kurz, bis die Seite da ist, dann verbinden wir
-    window.addEventListener('DOMContentLoaded', () => {
-        initLiveSystem();
-    });
-
     function initLiveSystem() {
         setStatusBar("🔄 Verbinde...", "var(--warning)");
         
-        if (pubnub) { pubnub.unsubscribeAll(); }
+        if (pubnub) { 
+            try { pubnub.unsubscribeAll(); } catch(e){} 
+        }
 
-        // Initialisiert die Live-Leitung
-        pubnub = new PubNub({
-            publishKey: 'pub-c-48606db8-ba5b-4375-9273-dfb4e5bb09be',
-            subscribeKey: 'sub-c-1793739a-6663-4903-8d65-ee43e622efd3',
-            userId: 'user-' + Math.floor(Math.random() * 10000)
-        });
+        try {
+            pubnub = new PubNub({
+                publishKey: 'pub-c-48606db8-ba5b-4375-9273-dfb4e5bb09be',
+                subscribeKey: 'sub-c-1793739a-6663-4903-8d65-ee43e622efd3',
+                userId: 'user-' + Math.floor(Math.random() * 10000)
+            });
 
-        pubnub.subscribe({ channels: [roomName] });
+            pubnub.subscribe({ channels: [roomName] });
 
-        pubnub.addListener({
-            status: function(s) {
-                if (s.category === "PNConnectedCategory") {
-                    setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-                    // Beim Beitritt fragen, ob schon Daten im Raum existieren
-                    pubnub.publish({ channel: roomName, message: { type: "ASK_DATA" } });
+            pubnub.addListener({
+                status: function(s) {
+                    if (s.category === "PNConnectedCategory") {
+                        setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
+                        pubnub.publish({ channel: roomName, message: { type: "ASK_DATA" } });
+                    }
+                },
+                message: function(event) {
+                    const msg = event.message;
+                    if (msg.type === "SYNC" && msg.room === roomName) {
+                        players = msg.data;
+                        localStorage.setItem('vData_' + roomName, JSON.stringify(players));
+                        updateUI();
+                    } else if (msg.type === "ASK_DATA" && players.length > 0) {
+                        broadcastData();
+                    }
                 }
-            },
-            message: function(event) {
-                const msg = event.message;
-                if (msg.type === "SYNC" && msg.room === roomName) {
-                    players = msg.data;
-                    localStorage.setItem('vData_' + roomName, JSON.stringify(players));
-                    updateUI();
-                } else if (msg.type === "ASK_DATA" && players.length > 0) {
-                    // Ein Freund ist beigetreten und braucht den aktuellen Stand
-                    broadcastData();
-                }
-            }
-        });
+            });
+        } catch (e) {
+            setStatusBar("⚠️ Verbindung blockiert oder fehlgeschlagen.", "var(--danger)");
+        }
     }
 
     function broadcastData() {
@@ -235,7 +243,7 @@
             
             players = JSON.parse(localStorage.getItem('vData_' + roomName)) || [];
             updateUI();
-            initLiveSystem();
+            if (typeof PubNub !== 'undefined') initLiveSystem();
         }
     }
 
