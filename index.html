@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Würfel Duell Live Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <script src="https://unpkg.com/piesocket-js@3"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -96,7 +96,7 @@
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Verbinde mit Live-Netzwerk...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Initialisiere Live-Netzwerk...</div>
     </div>
 
     <div class="card">
@@ -153,72 +153,82 @@
 </div>
 
 <script>
-    let gun = null;
-    let roomRef = null;
-    
-    let roomName = localStorage.getItem('gRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
-    localStorage.setItem('gRoomKey', roomName);
+    let pieSocketChannel = null;
+    let roomName = localStorage.getItem('pRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
+    localStorage.setItem('pRoomKey', roomName);
 
     let players = [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
-    // GunDB einmalig global initialisieren
-    gun = Gun([
-        'https://gun-manhattan.herokuapp.com/gun',
-        'https://gundb-relay.herokuapp.com/gun'
-    ]);
-
     window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('roomKeyInput').value = roomName;
-        // Zuerst lokale Daten laden, falls vorhanden, damit der Bildschirm nicht leer ist
-        players = JSON.parse(localStorage.getItem('vData_g_' + roomName)) || [];
+        // Lokale Daten sofort laden, damit die App direkt startklar ist
+        players = JSON.parse(localStorage.getItem('vData_p_' + roomName)) || [];
         updateUI();
-        initGunLive();
+        initLiveConnection();
     });
 
-    function initGunLive() {
-        setStatusBar("🔄 Verbinde...", "var(--warning)");
+    function initLiveConnection() {
+        setStatusBar("🔄 Verbinde mit Live-Kanal...", "var(--warning)");
 
-        roomRef = gun.get('wuerfelduell-live-app-v2').get(roomName);
-
-        // Listener für diesen Raum aktivieren
-        roomRef.get('playersData').on((data) => {
-            if (data && data.json) {
-                try {
-                    const remotePlayers = JSON.parse(data.json);
-                    // CRITICAL FIX: Nur überschreiben, wenn die Daten im Netz tatsächlich existieren und länger/anders sind!
-                    if (remotePlayers && remotePlayers.length >= 0 && JSON.stringify(remotePlayers) !== JSON.stringify(players)) {
-                        players = remotePlayers;
-                        localStorage.setItem('vData_g_' + roomName, JSON.stringify(players));
-                        updateUI();
-                    }
-                    setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-                } catch(e) {
-                    console.error("Fehler beim Daten-Parsing:", e);
-                }
-            } else {
-                // Wenn im Netzwerk noch gänzlich gähnende Leere herrscht, pushen wir unsere lokalen Daten hoch
-                if (players.length > 0) {
-                    roomRef.put({ json: JSON.stringify(players) });
-                }
-                setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-            }
+        // Nutzen den freien Demo-Cluster von PieSocket (extrem stabil für Web-Apps)
+        const pieSocket = new PieSocket.default({
+            clusterId: "demo",
+            apiKey: "oCdZl9Z6AswCgxI7vtEwQC22Yw27iY6S767SST6K", // Freier öffentlicher Demokey
+            notifyFromSelf: false
         });
 
-        // Visueller Fallback, falls der Server träge antwortet
-        setTimeout(() => {
+        // Verbindung zu einem spezifischen Channel (Raum) aufbauen
+        pieSocketChannel = pieSocket.subscribe("wuerfelduell-" + roomName);
+
+        pieSocketChannel.on("open", () => {
             setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-        }, 1500);
+            // Sobald wir drin sind, fragen wir die anderen im Raum, ob es bereits Daten gibt
+            setTimeout(() => {
+                pieSocketChannel.send(JSON.stringify({ type: "REQUEST_CURRENT_DATA" }));
+            }, 500);
+        });
+
+        // Auf eintreffende Nachrichten von Freunden reagieren
+        pieSocketChannel.on("message", (msg) => {
+            try {
+                const res = JSON.parse(msg.data);
+                
+                if (res.type === "SYNC_DATA") {
+                    const remotePlayers = res.data;
+                    if (remotePlayers && Array.isArray(remotePlayers)) {
+                        players = remotePlayers;
+                        localStorage.setItem('vData_p_' + roomName, JSON.stringify(players));
+                        updateUI();
+                    }
+                } 
+                else if (res.type === "REQUEST_CURRENT_DATA") {
+                    // Jemand ist neu beigetreten und braucht unseren aktuellen Stand
+                    if (players.length > 0) {
+                        sendDataToNetwork();
+                    }
+                }
+            } catch (e) {
+                console.error("Fehler beim Verarbeiten", e);
+            }
+        });
     }
 
-    function syncToNetwork() {
-        localStorage.setItem('vData_g_' + roomName, JSON.stringify(players));
-        if (roomRef) {
-            roomRef.put({ json: JSON.stringify(players) });
+    function sendDataToNetwork() {
+        if (pieSocketChannel) {
+            pieSocketChannel.send(JSON.stringify({
+                type: "SYNC_DATA",
+                data: players
+            }));
         }
+    }
+
+    function saveAndSync() {
+        localStorage.setItem('vData_p_' + roomName, JSON.stringify(players));
         updateUI();
+        sendDataToNetwork();
     }
 
     function setStatusBar(text, color) {
@@ -230,13 +240,15 @@
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
-            localStorage.setItem('gRoomKey', roomName);
+            localStorage.setItem('pRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             
-            // FIX: Vor dem Verbinden NICHT die Spielerliste leeren! Erst alte Daten aus dem neuen Speicher laden
-            players = JSON.parse(localStorage.getItem('vData_g_' + roomName)) || [];
+            // Erst alte lokale Daten laden, falls vorhanden
+            players = JSON.parse(localStorage.getItem('vData_p_' + roomName)) || [];
             updateUI();
-            initGunLive();
+            
+            // Alten Raum verlassen und neu verbinden
+            initLiveConnection();
         }
     }
 
@@ -247,20 +259,20 @@
 
         players.push({ name: name, balance: 0 });
         nameInput.value = '';
-        syncToNetwork();
+        saveAndSync();
     }
 
     function resetPlayerBalance(name) {
         if (confirm(`Kontostand von ${name} auf 0 € zurücksetzen?`)) {
             const player = players.find(p => p.name === name);
-            if (player) { player.balance = 0; syncToNetwork(); }
+            if (player) { player.balance = 0; saveAndSync(); }
         }
     }
 
     function deletePlayer(name) {
         if (confirm(`${name} löschen?`)) {
             players = players.filter(p => p.name !== name);
-            syncToNetwork();
+            saveAndSync();
         }
     }
 
@@ -364,13 +376,13 @@
         document.getElementById('global-bell').classList.remove('active');
         document.getElementById('global-bell').innerHTML = '🐮 <span>Kuhglocke (Inaktiv)</span>';
         
-        syncToNetwork();
+        saveAndSync();
     }
 
     function resetGame() {
         if (confirm('Möchtest du wirklich alle Spieler löschen?')) {
             players = [];
-            syncToNetwork();
+            saveAndSync();
         }
     }
 </script>
