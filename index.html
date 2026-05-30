@@ -96,7 +96,7 @@
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Verbinde mit dezentralem Netzwerk...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0;">Verbinde mit Live-Netzwerk...</div>
     </div>
 
     <div class="card">
@@ -156,7 +156,6 @@
     let gun = null;
     let roomRef = null;
     
-    // Zufälliger oder gespeicherter Raum
     let roomName = localStorage.getItem('gRoomKey') || 'runde-' + Math.floor(1000 + Math.random() * 9000);
     localStorage.setItem('gRoomKey', roomName);
 
@@ -165,49 +164,57 @@
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
+    // GunDB einmalig global initialisieren
+    gun = Gun([
+        'https://gun-manhattan.herokuapp.com/gun',
+        'https://gundb-relay.herokuapp.com/gun'
+    ]);
+
     window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('roomKeyInput').value = roomName;
+        // Zuerst lokale Daten laden, falls vorhanden, damit der Bildschirm nicht leer ist
+        players = JSON.parse(localStorage.getItem('vData_g_' + roomName)) || [];
+        updateUI();
         initGunLive();
     });
 
     function initGunLive() {
-        setStatusBar("🔄 Verbinde mit Live-Netzwerk...", "var(--warning)");
+        setStatusBar("🔄 Verbinde...", "var(--warning)");
 
-        // Initialisiert GunDB mit freien, öffentlichen Ausweich-Servern (Relays)
-        // Komplett unblockbar, da kein API-Schlüssel ablaufen oder gesperrt werden kann.
-        gun = Gun([
-            'https://gun-manhattan.herokuapp.com/gun',
-            'https://gundb-relay.herokuapp.com/gun'
-        ]);
+        roomRef = gun.get('wuerfelduell-live-app-v2').get(roomName);
 
-        roomRef = gun.get('wuerfelduell-live-app-v1').get(roomName);
-
-        // Auf Live-Updates lauschen
+        // Listener für diesen Raum aktivieren
         roomRef.get('playersData').on((data) => {
             if (data && data.json) {
                 try {
                     const remotePlayers = JSON.parse(data.json);
-                    // Nur aktualisieren, wenn sich lokal wirklich etwas unterscheidet
-                    if (JSON.stringify(remotePlayers) !== JSON.stringify(players)) {
+                    // CRITICAL FIX: Nur überschreiben, wenn die Daten im Netz tatsächlich existieren und länger/anders sind!
+                    if (remotePlayers && remotePlayers.length >= 0 && JSON.stringify(remotePlayers) !== JSON.stringify(players)) {
                         players = remotePlayers;
+                        localStorage.setItem('vData_g_' + roomName, JSON.stringify(players));
                         updateUI();
                     }
                     setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
                 } catch(e) {
-                    console.error("Datenfehler", e);
+                    console.error("Fehler beim Daten-Parsing:", e);
                 }
+            } else {
+                // Wenn im Netzwerk noch gänzlich gähnende Leere herrscht, pushen wir unsere lokalen Daten hoch
+                if (players.length > 0) {
+                    roomRef.put({ json: JSON.stringify(players) });
+                }
+                setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
             }
         });
 
-        // Falls das Netzwerk nach 3 Sekunden steht, Status updaten (Gun feuert nicht immer ein Connect-Event)
+        // Visueller Fallback, falls der Server träge antwortet
         setTimeout(() => {
-            if(document.getElementById('syncStatus').textContent.includes("🔄")) {
-                setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
-            }
-        }, 2500);
+            setStatusBar(`🟢 Live verbunden (Raum: ${roomName})`, "var(--success)");
+        }, 1500);
     }
 
     function syncToNetwork() {
+        localStorage.setItem('vData_g_' + roomName, JSON.stringify(players));
         if (roomRef) {
             roomRef.put({ json: JSON.stringify(players) });
         }
@@ -226,7 +233,8 @@
             localStorage.setItem('gRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             
-            players = [];
+            // FIX: Vor dem Verbinden NICHT die Spielerliste leeren! Erst alte Daten aus dem neuen Speicher laden
+            players = JSON.parse(localStorage.getItem('vData_g_' + roomName)) || [];
             updateUI();
             initGunLive();
         }
