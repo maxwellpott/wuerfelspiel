@@ -232,7 +232,7 @@
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Verbinde mit Google Firebase...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Initialisiere...</div>
     </div>
 
     <div class="card">
@@ -291,23 +291,23 @@
 </div>
 
 <script>
-    // Ein absolut stabiler Google Firebase Link (Echtzeit-Datenbank über HTTPS)
-    // Erlaubt direkten Lese- und Schreibzugriff ohne CORS-Einschränkungen
     const getFirebaseUrl = (room) => `https://wuerfelduell-live-default-rtdb.europe-west1.firebasedatabase.app/rooms/${room}.json`;
 
     let roomName = localStorage.getItem('wuerfelRoomKey') || 'room-' + Math.floor(1000 + Math.random() * 9000);
     localStorage.setItem('wuerfelRoomKey', roomName);
     document.getElementById('roomKeyInput').value = roomName;
 
-    let players = [];
+    // Lokales Backup laden, falls der Server offline ist
+    let players = JSON.parse(localStorage.getItem('wuerfelBackupPlayers')) || [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
-    // Erster Start
+    // UI sofort mit lokalen Daten rendern (Kein Feststecken im Ladebildschirm!)
+    updateUI();
     loadFromServer();
     
-    // Blitzschnelles Polling alle 3 Sekunden
+    // Polling alle 3 Sekunden
     setInterval(loadFromServer, 3000);
 
     async function loadFromServer() {
@@ -315,21 +315,36 @@
             const response = await fetch(getFirebaseUrl(roomName));
             if (response.ok) {
                 const data = await response.json();
-                players = data || [];
+                // Überprüfung ob Daten vorhanden sind und im Objekt-Format extrahieren
+                if (data && data.list) {
+                    players = data.list;
+                } else if (Array.isArray(data)) {
+                    players = data; // Abwärtskompatibilität
+                } else {
+                    players = [];
+                }
+                
+                // Lokales Backup frisch halten
+                localStorage.setItem('wuerfelBackupPlayers', JSON.stringify(players));
                 updateUI();
                 setStatusBar(`🟢 Live-Synchronisiert (Raum: ${roomName})`, "var(--success)");
+            } else {
+                setStatusBar("⚠️ Verbindung instabil. Nutze lokales Backup.", "var(--warning)");
             }
         } catch (e) {
-            setStatusBar("⚠️ Cloud-Sync unterbrochen. Prüfe Internetverbindung.", "var(--danger)");
+            setStatusBar("⚠️ Offline-Modus. Stand wird lokal gesichert.", "var(--warning)");
         }
     }
 
     async function saveToServer() {
+        // Sofort lokal sichern
+        localStorage.setItem('wuerfelBackupPlayers', JSON.stringify(players));
         try {
+            // Wir wickeln das Array sauber in ein gültiges JSON-Objekt ein
             await fetch(getFirebaseUrl(roomName), {
-                method: 'PUT', // Überschreibt die Liste sauber und direkt in der Google Cloud
+                method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(players)
+                body: JSON.stringify({ list: players })
             });
         } catch (e) {
             console.error("Fehler beim Cloud-Backup", e);
@@ -347,7 +362,7 @@
     function connectToRoom() {
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
-            roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); // Bereinigt Sonderzeichen für Firebase
+            roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
             localStorage.setItem('wuerfelRoomKey', roomName);
             document.getElementById('roomKeyInput').value = roomName;
             setStatusBar("Wechsle Raum...", "var(--warning)");
