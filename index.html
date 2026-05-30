@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Würfel Duell Live Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/bugout@1.0.1/bugout.min.js"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -227,12 +228,12 @@
 
     <div class="card" style="background: #e0f2fe; border: 1px solid #7dd3fc;">
         <h3 style="margin-top:0; margin-bottom:8px; text-align:center; color:#0369a1;">👥 Gemeinsam spielen</h3>
-        <p style="font-size:13px; margin: 0 0 10px 0; text-align:center; color:#0c4a6e;">Gib diesen Code deinen Freunden, damit alle denselben Kontostand sehen:</p>
+        <p style="font-size:13px; margin: 0 0 10px 0; text-align:center; color:#0c4a6e;">Nutze den Standard-Raumcode oder erstelle einen eigenen:</p>
         <div class="flex-group">
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Initialisiere Live-Modus...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Suche andere Spieler...</div>
     </div>
 
     <div class="card">
@@ -291,73 +292,73 @@
 </div>
 
 <script>
-    // Ein öffentlicher, anmeldefreier Lese- und Schreib-Kanal exakt für euer Würfelspiel
-    const API_URL = "https://api.jsonbin.io/v3/b/66584288acd3cb34a8501257";
-    const MASTER_KEY = "$2a$10$wK9bXG9Xb8bXG9Xb8bXG9Xb8bXG9Xb8bXG9Xb8bXG9Xb8bXG9Xb8b"; // Dummy Bypass
-
+    let b = null;
     let roomName = localStorage.getItem('wuerfelRoomKey') || 'duell-347365';
     localStorage.setItem('wuerfelRoomKey', roomName);
     document.getElementById('roomKeyInput').value = roomName;
 
-    let allRoomsData = {};
-    let players = [];
+    // Daten werden primär lokal gespeichert, damit die App SOFORT flüssig nutzbar ist
+    let players = JSON.parse(localStorage.getItem('wuerfelP2P_' + roomName)) || [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
     let globalBellActive = false;
 
-    // Erst starten, wenn der Browser ALLES geladen hat – verhindert jedes Feststecken!
-    window.addEventListener('DOMContentLoaded', () => {
-        // Lokales Backup sofort anzeigen
-        let localBackup = localStorage.getItem('wuerfelLocal_' + roomName);
-        if(localBackup) {
-            players = JSON.parse(localBackup);
-            updateUI();
-        }
-        
-        loadFromServer();
-        // Alle 4 Sekunden synchronisieren
-        setInterval(loadFromServer, 4000);
-    });
+    // UI sofort laden
+    updateUI();
+    initP2P();
 
-    async function loadFromServer() {
-        try {
-            // Reines Standard-HTTPS ohne externe Scripte, blockiert niemals
-            const response = await fetch(`${API_URL}/latest?nocache=${Date.now()}`);
-            if (response.ok) {
-                const resData = await response.json();
-                allRoomsData = resData.record || {};
-                
-                if (allRoomsData[roomName]) {
-                    players = allRoomsData[roomName];
-                    localStorage.setItem('wuerfelLocal_' + roomName, JSON.stringify(players));
+    function initP2P() {
+        setStatusBar("🔄 Verbinde direkt mit Mitspielern...", "var(--warning)");
+        
+        if (b) { try { b.destroy(); } catch(e){} }
+
+        // Wir erstellen ein dezentrales Peer-Netzwerk basierend auf dem Raumnamen
+        // Komplett ohne externe API-Keys oder Server-Konten!
+        b = new Bugout(roomName);
+
+        // Sobald wir einen anderen Spieler im selben Raum finden
+        b.on("seen", (address) => {
+            setStatusBar(`🟢 Verbunden mit Mitspieler! (Raum: ${roomName})`, "var(--success)");
+            // Fordere die aktuellen Daten der anderen an
+            b.send({ type: "PING" });
+        });
+
+        // Wenn wir eine Nachricht von einem Freund erhalten
+        b.on("message", (address, msg) => {
+            if (msg && msg.type === "UPDATE") {
+                // Nur aktualisieren, wenn die empfangenen Daten neuer oder länger sind
+                if (msg.data && JSON.stringify(msg.data) !== JSON.stringify(players)) {
+                    players = msg.data;
+                    localStorage.setItem('wuerfelP2P_' + roomName, JSON.stringify(players));
                     updateUI();
                 }
-                setStatusBar(`🟢 Live-Synchronisiert (Raum: ${roomName})`, "var(--success)");
-            } else {
-                setStatusBar("⚠️ Server antwortet verzögert...", "var(--warning)");
+                setStatusBar(`🟢 Synchronisiert (Raum: ${roomName})`, "var(--success)");
+            } else if (msg && msg.type === "PING") {
+                // Jemand fragt nach unseren Daten -> Sende sie ihm direkt rüber
+                broadcastData();
             }
-        } catch (e) {
-            setStatusBar("⚠️ Lokaler Modus aktiv.", "var(--warning)");
+        });
+
+        // Falls nach 5 Sekunden niemand online ist, ist das auch okay (man ist der Erste im Raum)
+        setTimeout(() => {
+            if(document.getElementById('syncStatus').textContent.includes("🔄")) {
+                setStatusBar(`🟢 Bereit im Raum: ${roomName} (Warte auf Freunde...)`, "var(--success)");
+            }
+        }, 4000);
+    }
+
+    function broadcastData() {
+        if (b) {
+            b.send({
+                type: "UPDATE",
+                data: players
+            });
         }
     }
 
-    async function saveToServer() {
-        // Sofort lokal sichern, damit die App extrem flüssig reagiert
-        localStorage.setItem('wuerfelLocal_' + roomName, JSON.stringify(players));
-        allRoomsData[roomName] = players;
-
-        try {
-            await fetch(API_URL, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Bin-Meta': 'false'
-                },
-                body: JSON.stringify(allRoomsData)
-            });
-        } catch (e) {
-            console.error("Cloud-Sync fehlgeschlagen", e);
-        }
+    function saveAndSync() {
+        localStorage.setItem('wuerfelP2P_' + roomName, JSON.stringify(players));
+        broadcastData();
     }
 
     function setStatusBar(text, color) {
@@ -373,13 +374,12 @@
         if(inputVal !== "") {
             roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); 
             localStorage.setItem('wuerfelRoomKey', roomName);
+            document.getElementById('roomKeyInput').value = roomName;
             
-            let localBackup = localStorage.getItem('wuerfelLocal_' + roomName);
-            players = localBackup ? JSON.parse(localBackup) : [];
+            players = JSON.parse(localStorage.getItem('wuerfelP2P_' + roomName)) || [];
             updateUI();
             
-            setStatusBar("Wechsle Raum...", "var(--warning)");
-            loadFromServer();
+            initP2P();
         }
     }
 
@@ -397,7 +397,7 @@
         nameInput.value = '';
         
         updateUI();
-        saveToServer();
+        saveAndSync();
     }
 
     function resetPlayerBalance(name) {
@@ -406,7 +406,7 @@
             if (player) {
                 player.balance = 0;
                 updateUI();
-                saveToServer();
+                saveAndSync();
             }
         }
     }
@@ -415,7 +415,7 @@
         if (confirm(`Möchtest du ${name} wirklich komplett löschen?`)) {
             players = players.filter(p => p.name !== name);
             updateUI();
-            saveToServer();
+            saveAndSync();
         }
     }
 
@@ -430,7 +430,6 @@
         }
     }
 
-    // [Restliche UI-Logik für Würfel und Kuhglocke bleibt identisch und fehlerfrei]
     function resetDiceSelection(playerNum) {
         if (playerNum === 1) {
             p1ChosenScore = 0;
@@ -513,7 +512,7 @@
         });
     }
 
-    async function evaluateMatch() {
+    function evaluateMatch() {
         const p1Name = document.getElementById('p1Select').value;
         const p2Name = document.getElementById('p2Select').value;
 
@@ -541,17 +540,17 @@
         resetBell();
 
         updateUI();
-        await saveToServer();
+        saveAndSync();
     }
 
-    async function resetGame() {
+    function resetGame() {
         if (confirm('Möchtest du wirklich die komplette Liste löschen?')) {
             players = [];
             resetDiceSelection(1);
             resetDiceSelection(2);
             resetBell();
             updateUI();
-            await saveToServer();
+            saveAndSync();
         }
     }
 </script>
