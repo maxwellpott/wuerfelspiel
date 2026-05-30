@@ -232,7 +232,7 @@
             <input type="text" id="roomKeyInput" placeholder="Raum-Code eintragen...">
             <button onclick="connectToRoom()" style="background:#0284c7;">Verbinden</button>
         </div>
-        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Initialisiere Live-Modus...</div>
+        <div id="syncStatus" class="status-bar" style="margin-top: 8px; margin-bottom:0; font-weight:bold;">Verbinde mit Google Firebase...</div>
     </div>
 
     <div class="card">
@@ -291,14 +291,14 @@
 </div>
 
 <script>
-    // Nutzen einer absolut offenen, CORS-Sicherheits-optimierten Cloud-Schnittstelle (Countapi-Ersatz via KV)
-    const BIN_URL = "https://api.npoint.io/6bf4667104bda9b1ba5a"; // Unser dedizierter Hauptknotenpunkt
+    // Ein absolut stabiler Google Firebase Link (Echtzeit-Datenbank über HTTPS)
+    // Erlaubt direkten Lese- und Schreibzugriff ohne CORS-Einschränkungen
+    const getFirebaseUrl = (room) => `https://wuerfelduell-live-default-rtdb.europe-west1.firebasedatabase.app/rooms/${room}.json`;
 
-    let roomName = localStorage.getItem('wuerfelRoomKey') || 'duell-' + Math.floor(1000 + Math.random() * 9000);
+    let roomName = localStorage.getItem('wuerfelRoomKey') || 'room-' + Math.floor(1000 + Math.random() * 9000);
     localStorage.setItem('wuerfelRoomKey', roomName);
     document.getElementById('roomKeyInput').value = roomName;
 
-    let allRoomsData = {};
     let players = [];
     let p1ChosenScore = 0;
     let p2ChosenScore = 0;
@@ -307,26 +307,17 @@
     // Erster Start
     loadFromServer();
     
-    // Polling alle 3.5 Sekunden für echtes Live-Feeling
-    setInterval(loadFromServer, 3500);
+    // Blitzschnelles Polling alle 3 Sekunden
+    setInterval(loadFromServer, 3000);
 
     async function loadFromServer() {
         try {
-            // Holen der JSON von der stabilen npoint-Plattform
-            const response = await fetch(BIN_URL);
+            const response = await fetch(getFirebaseUrl(roomName));
             if (response.ok) {
-                allRoomsData = await response.json();
-                
-                // Falls für diesen Raum noch keine Liste existiert, leere erstellen
-                if (!allRoomsData[roomName]) {
-                    allRoomsData[roomName] = [];
-                }
-                
-                players = allRoomsData[roomName];
+                const data = await response.json();
+                players = data || [];
                 updateUI();
                 setStatusBar(`🟢 Live-Synchronisiert (Raum: ${roomName})`, "var(--success)");
-            } else {
-                setStatusBar("⚠️ Server antwortet verzögert... Bitte warten.", "var(--warning)");
             }
         } catch (e) {
             setStatusBar("⚠️ Cloud-Sync unterbrochen. Prüfe Internetverbindung.", "var(--danger)");
@@ -335,11 +326,10 @@
 
     async function saveToServer() {
         try {
-            allRoomsData[roomName] = players;
-            await fetch(BIN_URL, {
-                method: 'POST', // Npoint erlaubt POST/PUT zum Überschreiben des gesamten Objekts
+            await fetch(getFirebaseUrl(roomName), {
+                method: 'PUT', // Überschreibt die Liste sauber und direkt in der Google Cloud
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(allRoomsData)
+                body: JSON.stringify(players)
             });
         } catch (e) {
             console.error("Fehler beim Cloud-Backup", e);
@@ -357,8 +347,9 @@
     function connectToRoom() {
         const inputVal = document.getElementById('roomKeyInput').value.trim();
         if(inputVal !== "") {
-            roomName = inputVal;
+            roomName = inputVal.replace(/[^a-zA-Z0-9-_]/g, ''); // Bereinigt Sonderzeichen für Firebase
             localStorage.setItem('wuerfelRoomKey', roomName);
+            document.getElementById('roomKeyInput').value = roomName;
             setStatusBar("Wechsle Raum...", "var(--warning)");
             loadFromServer();
         }
